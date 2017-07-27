@@ -15,7 +15,7 @@ using UnityEngine;
 /// <summary>
 /// Socket基类（负责接发消息，并处理粘包）
 /// </summary>
-public class SocketBase : MonoBehaviour
+public class ProtocolSocket : MonoBehaviour
 {
     public string host;//IP地址
     public int port;//端口
@@ -45,12 +45,17 @@ public class SocketBase : MonoBehaviour
     /// <summary>
     /// 接收到数据包
     /// </summary>
-    public event Action<byte[]> received;
+    public event Action<uint, byte[]> received;
     #endregion
 
     private byte[] receiveBuffer = new byte[0xffff];//设置一个缓冲区，用来保存数据
     private TcpClient tcp;
     private NetworkStream stream;
+
+    protected virtual void Start()
+    {
+        Connect();
+    }
 
     /// <summary>
     /// 开始连接
@@ -82,6 +87,25 @@ public class SocketBase : MonoBehaviour
         {
             Debug.LogError("连接服务器失败！ Host:" + host + " Port:" + port);
         }
+    }
+
+
+    /// <summary>
+    /// 发送协议包
+    /// </summary>
+    /// <param name="buffer"></param>
+    public void Send(uint protocolId, byte[] body)
+    {
+        bodyLength = body.Length;
+        byte[] headBuffer = new byte[8] { 0x7D, 0, 0, 0, 0, 1, 0, 0x7F };//125 127
+        int totalLength = 8 + 4 + bodyLength;//协议头 + 4字节协议id + 包体
+        Array.Copy(BitConverter.GetBytes(totalLength), 0, headBuffer, 1, 4); //包头写入长度
+
+        byte[] buffer = new byte[totalLength];
+        Array.Copy(headBuffer, 0, buffer, 0, 8);
+        Array.Copy(BitConverter.GetBytes(protocolId), 0, buffer, 8, 4);
+        if (bodyLength > 0) Array.Copy(body, 0, buffer, 12, bodyLength);
+        stream.Write(buffer, 0, totalLength);
     }
 
     #region 读取数据包
@@ -118,6 +142,8 @@ public class SocketBase : MonoBehaviour
                 disconnected();
             return;
         }
+
+        stream.BeginRead(receiveBuffer, 0, receiveBuffer.Length, Recevie, null);
 
         int readIndex = 0;//当前数据包读取索引
         while (readIndex < numberOfBytesRead)
@@ -165,7 +191,7 @@ public class SocketBase : MonoBehaviour
             if (bodyWriteIndex == bodyLength)
             {
                 if (received != null)
-                    received(bodyBuffer);
+                    received(protocol, bodyBuffer);
 
                 //清空缓存
                 protocol = 0;
@@ -175,8 +201,6 @@ public class SocketBase : MonoBehaviour
             }
         }
 
-        stream.BeginRead(receiveBuffer, 0, receiveBuffer.Length, Recevie, null);
     }
     #endregion
-
 }
